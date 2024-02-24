@@ -3,37 +3,14 @@ from pynput.mouse import Button, Controller
 import threading
 import time
 
+from classes import Action, Macro
+
 macros = {}
 keyboard_controller = Controller()
 
 
 def on_hotkey_activate(hotkey):
     print("test")
-
-
-class Macro:
-    def __init__(self, hotkey, actions):
-        self.hotkey = hotkey
-        self.actions = actions
-        self.running = False
-        self.thread = None
-
-    def start(self):
-        self.running = True
-        self.thread = threading.Thread(target=self.run)
-        self.thread.start()
-
-    def stop(self):
-        self.running = False
-        if self.thread:
-            self.thread.join()
-
-    def run(self):  # TODO: fix this
-        while self.running:
-            keyboard_controller.press(self.macro_key)
-            time.sleep(self.pressed_duration)
-            keyboard_controller.release(self.macro_key)
-            time.sleep(self.released_duration)
 
 
 def activate_macro(macro):
@@ -43,7 +20,6 @@ def activate_macro(macro):
 def create_macro_wizard():
     def record_key_sequence():
         pressed_keys = {}
-        hotkey = None
 
         def on_press(key):
             pressed_keys[key] = True
@@ -92,20 +68,51 @@ def create_macro_wizard():
     actions = []
 
     print("Record hotkey now...")
-    time.sleep(0.1)  # Added to ignore Enter while typing the 'new' command
+    time.sleep(0.01)  # Added to ignore Enter while typing the 'new' command
     hotkey = record_key_sequence()
 
+    print("Record a key and add it to the macro now...")
     while True:
-        print("Record a key and add it to the macro now...")
+        if actions:
+            print("Record a key and add it to the macro now...")
         recorded_action = record_action()
         if recorded_action is not None:
-            actions.append(recorded_action)
+            action_duration = float(input("How long should the action be active (in milliseconds)?: "))
+            actions.append(Action(action_type=Action.Type.KEY, action_duration=action_duration, action_key=recorded_action))
+            wait_time = float(input("How long should be the pause between this and the next action (in milliseconds)?: "))
+            actions.append(Action(Action.Type.WAIT, wait_time))
         elif recorded_action is None and actions:
             break
 
-    macros[hotkey] = Macro(hotkey, actions)  # TODO: fix this
-
+    macros[tuple(hotkey)] = Macro(hotkey, actions)
     print("Macro created successfully!")
+
+
+def list_macros():
+    def print_if_not_last_element(current_index, elements_collection, string):
+        if current_index < len(elements_collection) - 1:
+            print(string, end="")
+
+    def format_key_name(key):
+        return str(key).replace("Key.", "").strip("'\"").upper()
+
+    for macros_index, macro_hotkey in enumerate(macros):
+        print("Hotkey: ", end="")
+        for hotkeys_index, key in enumerate(macro_hotkey):
+            print(format_key_name(key), end="")
+            print_if_not_last_element(hotkeys_index, macro_hotkey, " + ")
+
+        print("\nSequence: ", end="")
+        for actions_index, action in enumerate(macros[macro_hotkey].actions):
+            print(f"{action.action_type.value} ", end="")
+            if action.action_type == Action.Type.KEY:
+                print(f"{format_key_name(action.action_key)} ", end="")
+            print(f"for {action.action_duration}ms", end="")
+            print_if_not_last_element(actions_index, macros[macro_hotkey].actions, " then ")
+
+        if macros_index < len(macros) - 1:
+            print()
+        print()
 
 
 if __name__ == '__main__':
@@ -119,4 +126,4 @@ if __name__ == '__main__':
             create_macro_wizard()
 
         if command.startswith(('list', 'l')):
-            print("TODO")
+            list_macros()
