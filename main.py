@@ -1,3 +1,5 @@
+import sys
+
 from pynput import mouse, keyboard
 from pynput.mouse import Button, Controller
 import time
@@ -5,7 +7,7 @@ import pickle
 
 from classes import Action, Macro
 
-macros = {}
+macros = []
 keyboard_controller = Controller()
 
 
@@ -29,6 +31,13 @@ def load_macros_from_file():
             macros = pickle.load(file)
     except FileNotFoundError:
         return
+
+
+def print_help():
+    print("Commands:\n"
+          "Create new macro: 'new' or 'n'\n"
+          "List all saved macros: 'list' or 'ls' or 'l'\n"
+          "Delete saved macro: 'delete' or 'del' or 'd'")
 
 
 def create_macro_wizard():
@@ -92,15 +101,24 @@ def create_macro_wizard():
         recorded_action = record_action()
         if recorded_action is not None:
             action_duration = float(input("How long should the action be active (in milliseconds)?: "))
-            actions.append(Action(action_type=Action.Type.KEY, action_duration=action_duration, action_key=recorded_action))
-            wait_time = float(input("How long should be the pause between this and the next action (in milliseconds)?: "))
+            actions.append(
+                Action(action_type=Action.Type.KEY, action_duration=action_duration, action_key=recorded_action))
+            wait_time = float(
+                input("How long should be the pause between this and the next action (in milliseconds)?: "))
             actions.append(Action(Action.Type.WAIT, wait_time))
         elif recorded_action is None and actions:
             break
 
-    macros[tuple(hotkey)] = Macro(hotkey, actions)
+    macros.append(Macro(hotkey, actions))
     print("Macro created successfully!")
 
+    save_macros_to_file()
+
+
+def delete_macro_wizard():
+    list_macros()
+    index = int(input("\nEnter the number of the macro to be deleted: "))
+    del macros[index - 1]
     save_macros_to_file()
 
 
@@ -112,19 +130,20 @@ def list_macros():
     def format_key_name(key):
         return str(key).replace("Key.", "").strip("'\"").upper()
 
-    for macros_index, macro_hotkey in enumerate(macros):
+    for macros_index, macro in enumerate(macros):
+        print(f"Macro {macros_index + 1}:")
         print("Hotkey: ", end="")
-        for hotkeys_index, key in enumerate(macro_hotkey):
-            print(format_key_name(key), end="")
-            print_if_not_last_element(hotkeys_index, macro_hotkey, " + ")
+        for hotkeys_index, hotkey in enumerate(macro.hotkey):
+            print(format_key_name(hotkey), end="")
+            print_if_not_last_element(hotkeys_index, macro.hotkey, " + ")
 
         print("\nSequence: ", end="")
-        for actions_index, action in enumerate(macros[macro_hotkey].actions):
+        for actions_index, action in enumerate(macro.actions):
             print(f"{action.action_type.value} ", end="")
             if action.action_type == Action.Type.KEY:
                 print(f"{format_key_name(action.action_key)} ", end="")
             print(f"for {action.action_duration}ms", end="")
-            print_if_not_last_element(actions_index, macros[macro_hotkey].actions, " then ")
+            print_if_not_last_element(actions_index, macro.actions, " then ")
 
         if macros_index < len(macros) - 1:
             print()
@@ -134,13 +153,22 @@ def list_macros():
 if __name__ == '__main__':
     load_macros_from_file()
     print("Enter 'help' or 'h' to show command list.")
-    print("Enter 'quit' or 'q' to quit.\n")
+    print("Enter 'quit' or 'q' to quit.")
 
     while True:
         command = input()
 
+        if command.startswith(('help', 'h')):
+            print_help()
+
+        if command.startswith(('quit', 'q')):
+            sys.exit()
+
         if command.startswith(('new', 'n')):
             create_macro_wizard()
 
-        if command.startswith(('list', 'l')):
+        if command.startswith(('list', 'ls', 'l')):
             list_macros()
+
+        if command.startswith(('delete', 'del', 'd')):
+            delete_macro_wizard()
