@@ -1,22 +1,13 @@
 import sys
-
-from pynput import mouse, keyboard
-from pynput.mouse import Button, Controller
 import time
 import pickle
+from pynput import mouse, keyboard
+from pynput.mouse import Button, Controller
 
-from classes import Action, Macro
+from classes import Action, Macro, Command
 
 macros = []
 keyboard_controller = Controller()
-
-
-def on_hotkey_activate(hotkey):
-    print("test")
-
-
-def activate_macro(macro):
-    macro.start()
 
 
 def save_macros_to_file():
@@ -33,6 +24,10 @@ def load_macros_from_file():
         return
 
 
+def exit_program():
+    sys.exit()
+
+
 def print_help():
     print("Commands:\n"
           "Create new macro: 'new' or 'n'\n"
@@ -40,28 +35,29 @@ def print_help():
           "Delete saved macro: 'delete' or 'del' or 'd'")
 
 
+def listen_for_key_sequence():
+    pressed_keys = {}
+
+    def on_press(key):
+        pressed_keys[key] = True
+
+    def on_release(key):
+        if key in pressed_keys:
+            pressed_keys[key] = False
+
+        if all(value is False for value in pressed_keys.values()):
+            keyboard_listener.stop()
+
+    keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    keyboard_listener.start()
+
+    while keyboard_listener.running:
+        pass
+
+    return list(pressed_keys.keys())
+
+
 def create_macro_wizard():
-    def record_key_sequence():
-        pressed_keys = {}
-
-        def on_press(key):
-            pressed_keys[key] = True
-
-        def on_release(key):
-            if key in pressed_keys:
-                pressed_keys[key] = False
-
-            if all(value is False for value in pressed_keys.values()):
-                keyboard_listener.stop()
-
-        keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        keyboard_listener.start()
-
-        while keyboard_listener.running:
-            pass
-
-        return list(pressed_keys.keys())
-
     def record_action() -> object:
         TIMEOUT_DURATION = 3  # in seconds
         recorded_action = None
@@ -91,8 +87,8 @@ def create_macro_wizard():
     actions = []
 
     print("Record hotkey now...")
-    time.sleep(0.01)  # Added to ignore Enter while typing the 'new' command
-    hotkey = record_key_sequence()
+    time.sleep(0.1)  # Added to ignore Enter while typing the create command
+    hotkey = listen_for_key_sequence()
 
     print("Record a key and add it to the macro now...")
     while True:
@@ -130,6 +126,9 @@ def list_macros():
     def format_key_name(key):
         return str(key).replace("Key.", "").strip("'\"").upper()
 
+    if not macros:
+        print("No saved macros.")
+
     for macros_index, macro in enumerate(macros):
         print(f"Macro {macros_index + 1}:")
         print("Hotkey: ", end="")
@@ -142,7 +141,7 @@ def list_macros():
             print(f"{action.action_type.value} ", end="")
             if action.action_type == Action.Type.KEY:
                 print(f"{format_key_name(action.action_key)} ", end="")
-            print(f"for {action.action_duration}ms", end="")
+            print(f"for {action.action_duration * 1000}ms", end="")
             print_if_not_last_element(actions_index, macro.actions, " then ")
 
         if macros_index < len(macros) - 1:
@@ -150,25 +149,41 @@ def list_macros():
         print()
 
 
+def start_macros():
+    def find_macro_by_hotkey(provided_hotkey):
+        nonlocal macro
+        for macro in macros:
+            if macro.hotkey == provided_hotkey:
+                return macro
+        return None
+
+    time.sleep(0.1)
+
+    pressed_keys = listen_for_key_sequence()
+    macro = find_macro_by_hotkey(pressed_keys)
+    if not macro.running:
+        macro.start()
+    else:
+        macro.stop()
+
+
+commands = [
+    Command(['quit', 'q'], 'Exits the program.', exit_program),
+    Command(['help', 'h'], 'Prints available commands.', print_help),
+    Command(['new', 'n'], 'Creates a new macro.', create_macro_wizard),
+    Command(['list', 'ls', 'l'], 'Lists created macros.', list_macros),
+    Command(['delete', 'del', 'd'], 'Deletes a chosen macro.', delete_macro_wizard),
+    Command(['start', 's'], 'Allows the macros to be used.', start_macros)
+]
+
 if __name__ == '__main__':
     load_macros_from_file()
     print("Enter 'help' or 'h' to show command list.")
     print("Enter 'quit' or 'q' to quit.")
 
     while True:
-        command = input()
-
-        if command.startswith(('help', 'h')):
-            print_help()
-
-        if command.startswith(('quit', 'q')):
-            sys.exit()
-
-        if command.startswith(('new', 'n')):
-            create_macro_wizard()
-
-        if command.startswith(('list', 'ls', 'l')):
-            list_macros()
-
-        if command.startswith(('delete', 'del', 'd')):
-            delete_macro_wizard()
+        user_input = input()
+        for command in commands:
+            if user_input in command.aliases:
+                command.execute()
+                break
