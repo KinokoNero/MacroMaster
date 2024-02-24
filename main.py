@@ -1,7 +1,7 @@
 from pynput import mouse, keyboard
 from pynput.mouse import Button, Controller
-import threading
 import time
+import pickle
 
 from classes import Action, Macro
 
@@ -15,6 +15,20 @@ def on_hotkey_activate(hotkey):
 
 def activate_macro(macro):
     macro.start()
+
+
+def save_macros_to_file():
+    with open('macros.pkl', 'wb') as file:
+        pickle.dump(macros, file)
+
+
+def load_macros_from_file():
+    try:
+        with open('macros.pkl', 'rb') as file:
+            global macros
+            macros = pickle.load(file)
+    except FileNotFoundError:
+        return
 
 
 def create_macro_wizard():
@@ -87,6 +101,8 @@ def create_macro_wizard():
     macros[tuple(hotkey)] = Macro(hotkey, actions)
     print("Macro created successfully!")
 
+    save_macros_to_file()
+
 
 def list_macros():
     def print_if_not_last_element(current_index, elements_collection, string):
@@ -116,6 +132,7 @@ def list_macros():
 
 
 if __name__ == '__main__':
+    load_macros_from_file()
     print("Enter 'help' or 'h' to show command list.")
     print("Enter 'quit' or 'q' to quit.\n")
 
