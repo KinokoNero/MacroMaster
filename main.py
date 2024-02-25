@@ -1,10 +1,11 @@
+import pickle
 import sys
 import time
-import pickle
-from pynput import mouse, keyboard
-from pynput.mouse import Button, Controller, Listener
 
-from classes import Action, Macro, Command
+from pynput import mouse, keyboard
+from pynput.mouse import Controller
+
+from classes import Action, Macro, Command, Input
 
 macros = []
 keyboard_controller = Controller()
@@ -36,88 +37,114 @@ def print_help():
           "Start listening to hotkeys: 'start' or 's'")
 
 
-def listen_for_key_sequence():
-    pressed_keys = {}
+def listen_for_inputs():
+    inputs = {}
+    input_key = None
 
-    def on_press(key):
-        pressed_keys[key] = True
-
-    def on_release(key):
-        if key in pressed_keys:
-            pressed_keys[key] = False
-
-        if all(value is False for value in pressed_keys.values()):
+    def check_inactivity():
+        if inputs and all(value is False for value in inputs.values()):
+            mouse_listener.stop()
             keyboard_listener.stop()
 
+    def on_click(x, y, button, pressed):
+        nonlocal input_key
+        input_key = Input(Input.InputSource.MOUSE, Input.InputEvent(input_code=button, input_coordinates={'x': x, 'y': y}))
+        if pressed:
+            inputs[input_key] = True
+        else:
+            inputs[input_key] = False
+            check_inactivity()
+
+    def on_press(key):
+        nonlocal input_key
+        input_key = Input(Input.InputSource.KEYBOARD, Input.InputEvent(input_code=key))
+        inputs[input_key] = True
+
+    def on_release(key):
+        nonlocal input_key
+        input_key = Input(Input.InputSource.KEYBOARD, Input.InputEvent(input_code=key))
+        if input_key in inputs:
+            inputs[input_key] = False
+        check_inactivity()
+
+    mouse_listener = mouse.Listener(on_click=on_click)
+    mouse_listener.start()
     keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     keyboard_listener.start()
 
-    while keyboard_listener.running:
+    while mouse_listener.running and keyboard_listener.running:
         pass
 
-    return list(pressed_keys.keys())
+    return list(inputs.keys())
+
+
+def format_action_input_name(action_input):
+    formatted_action_input_name = str(action_input)
+    if formatted_action_input_name.startswith("Button."):
+        formatted_action_input_name = formatted_action_input_name.replace("Button.", "") + " MOUSE BUTTON"
+    elif formatted_action_input_name.startswith("Key."):
+        formatted_action_input_name = formatted_action_input_name.replace("Key.", "")
+    return formatted_action_input_name.strip("'\"").upper()
 
 
 def create_macro_wizard():
-    def record_action() -> Action or None:
-        TIMEOUT_DURATION = 3  # in seconds
-        recorded_action = None
+    def listen_for_single_input() -> Input:
+        # Mouse handling
+        def on_click(x, y, button, pressed):
+            nonlocal recorded_input
+            recorded_input = Input(Input.InputSource.MOUSE, Input.InputEvent(input_code=button, input_coordinates={'x': x, 'y': y}))
+            mouse_listener.stop()
 
         # Keyboard handling
         def on_press(pressed_key):
-            nonlocal recorded_action
-            recorded_action = Action(action_type=Action.Type.KEY, action_input=pressed_key)
+            nonlocal recorded_input
+            recorded_input = Input(Input.InputSource.KEYBOARD, Input.InputEvent(input_code=pressed_key))
             keyboard_listener.stop()
-
-        # Mouse handling
-        def on_click(x, y, button, pressed):
-            nonlocal recorded_action
-            recorded_action = Action(action_type=Action.Type.CLICK, action_input=button, click_coordinates=[x, y])
-            mouse_listener.stop()
 
         keyboard_listener = keyboard.Listener(on_press=on_press)
         keyboard_listener.start()
         mouse_listener = mouse.Listener(on_click=on_click)
         mouse_listener.start()
 
-        # Timeout handling
-        start_time = time.time()
         while keyboard_listener.running and mouse_listener.running:
-            elapsed_time = time.time() - start_time
-            if elapsed_time >= TIMEOUT_DURATION:
-                keyboard_listener.stop()
-                break
+            pass
 
-        return recorded_action
+        keyboard_listener.stop()
+        mouse_listener.stop()
+        return recorded_input
 
     actions = []
 
     # Hotkey recording
     print("Record hotkey now...")
     time.sleep(0.1)  # Added to ignore Enter while typing the create command
-    hotkey = listen_for_key_sequence()
+    hotkey = listen_for_inputs()
 
     # Macro recording
-    print("Record a key and add it to the macro now...")
-    while True:
-        if actions:
+    add_more_actions = True
+    while add_more_actions:
+        add_another_simultaneous_action = True
+        while add_another_simultaneous_action:
             print("Record a key and add it to the macro now...")
+            recorded_input = listen_for_single_input()
+            if recorded_input is not None:
+                if recorded_input.input_source == Input.InputSource.MOUSE:
+                    if input("Should the mouse click be at the recorded location (y/n)?\n").lower() in ['no', 'n']:
+                        recorded_input.input_event.input_coordinates = None
 
-        recorded_action = record_action()
-        if recorded_action is not None:
-            if recorded_action.action_type == Action.Type.CLICK:
-                user_input = input("Should the mouse click be at the recorded location (y/n)?").lower()
-                if user_input in ['no', 'n']:
-                    recorded_action.click_coordinates = None
+                action_duration = float(input("How long should the action be active (in milliseconds)?: "))
+                action = Action(action_duration=action_duration, action_input=recorded_input)
+                actions.append(action)
 
-            recorded_action.action_duration = float(input("How long should the action be active (in milliseconds)?: "))
-            actions.append(recorded_action)
+            if input("Do you want to add another simultaneous input (y/n)?\n").lower() in ['no', 'n']:
+                add_another_simultaneous_action = False
 
-            wait_time = float(
-                input("How long should be the pause between this and the next action (in milliseconds)?: "))
-            actions.append(Action(action_type=Action.Type.WAIT, action_duration=wait_time))
-        elif recorded_action is None and actions:
-            break
+        wait_time = float(
+            input("How long should be the pause between this and the next set of actions (in milliseconds)?: "))
+        actions.append(Action(action_duration=wait_time))
+
+        if input("Do you still want to add more actions to this macro (y/n)?\n").lower() in ['no', 'n']:
+            add_more_actions = False
 
     macros.append(Macro(hotkey=hotkey, actions=actions))
     print("Macro created successfully!")
@@ -137,15 +164,6 @@ def list_macros():
         if current_index < len(elements_collection) - 1:
             print(string, end="")
 
-    def format_action_input_name(action_input):
-        formatted_action_input_name = str(action_input)
-        if formatted_action_input_name.startswith("Button."):
-            formatted_action_input_name = formatted_action_input_name.replace("Button.", "") + " MOUSE BUTTON"
-        elif formatted_action_input_name.startswith("Key."):
-            formatted_action_input_name = formatted_action_input_name.replace("Key.", "")
-
-        return formatted_action_input_name.strip("'\"").upper()
-
     if not macros:
         print("No saved macros.")
 
@@ -153,18 +171,29 @@ def list_macros():
         print(f"Macro {macros_index + 1}:")
         print("Hotkey: ", end="")
         for hotkeys_index, hotkey in enumerate(macro.hotkey):
-            print(format_action_input_name(hotkey), end="")
+            print(format_action_input_name(hotkey.input_event.input_code), end="")
             print_if_not_last_element(hotkeys_index, macro.hotkey, " + ")
 
         print("\nSequence: ", end="")
         for actions_index, action in enumerate(macro.actions):
-            print(f"{action.action_type.value} ", end="")
-            if action.action_type != Action.Type.WAIT:
-                print(f"{format_action_input_name(action.action_input)} ", end="")
-            if action.action_type == Action.Type.CLICK and action.click_coordinates:
-                print(f"at X={action.click_coordinates[0]}, Y={action.click_coordinates[1]} ", end="")
+            if action.action_input is not None:
+                if action.action_input.input_source == Input.InputSource.MOUSE:
+                    print("click ", end="")
+                elif action.action_input.input_source == Input.InputSource.KEYBOARD:
+                    print("press ", end="")
+
+                print(f"{format_action_input_name(action.action_input.input_event.input_code)} ", end="")
+
+                if action.action_input.input_event.input_coordinates is not None:
+                    print(f"at X={action.action_input.input_event.input_coordinates['x']}, Y={action.action_input.input_event.input_coordinates['y']} ", end="")
+            else:
+                print("wait ", end="")
+
             print(f"for {action.action_duration}ms", end="")
-            print_if_not_last_element(actions_index, macro.actions, " then ")
+            if actions_index < len(macro.actions) - 1 and (macro.actions[actions_index].action_input is not None and macro.actions[actions_index + 1].action_input is not None):
+                print_if_not_last_element(actions_index, macro.actions, " and ")
+            else:
+                print_if_not_last_element(actions_index, macro.actions, " then ")
 
         if macros_index < len(macros) - 1:
             print()
@@ -175,14 +204,14 @@ def start_macros():
     def find_macro_by_hotkey(provided_hotkey):
         nonlocal macro
         for macro in macros:
-            if macro.hotkey == provided_hotkey:
+            if macro.hotkey == provided_hotkey:  # TODO: fix
                 return macro
         return None
 
     time.sleep(0.1)
 
     while True:
-        pressed_keys = listen_for_key_sequence()
+        pressed_keys = listen_for_inputs()
         macro = find_macro_by_hotkey(pressed_keys)
         if macro:
             if not macro.running:
